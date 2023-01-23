@@ -1,0 +1,129 @@
+import pandas as pd
+import numpy as np
+from regex import X
+from tqdm import trange
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LinearRegression
+import statsmodels.api as sm
+
+
+df = pd.read_excel(r'/Users/manojgottipati/Desktop/MQF/Rutgers Coursework/Term1/FixedIncome/Assignments/Assignment_04_Data.xlsx')
+# df.index = df['date']
+df = df.set_index("date")
+features_level = ['3mt', '6mt', '1yr', '2yr', '3yr', '7yr', '10yr', '20yr', '30yr'] 
+features_diff = ['diff_3mt', 'diff_6mt',
+       'diff_1yr', 'diff_2yr', 'diff_3yr', 'diff_7yr', 'diff_10yr',
+       'diff_20yr', 'diff_30yr']
+
+for i in features_level:
+    df['diff_'+i] = df[i].shift(1)-df[i]
+df=df.dropna()
+
+
+df_diff  = df[features_diff]
+corr_df = df_diff.corr()
+
+x = df.loc[:, features_level].values
+y = df_diff.loc[:, features_diff].values
+
+def calc_PCA(vals):
+    pca = PCA(n_components=9)
+    principalComponents = pca.fit_transform(vals)
+    principalDf = pd.DataFrame(data = principalComponents
+                , columns = ['principal component 1', 'principal component 2',
+                                'principal component 3', 'principal component 4',
+                                'principal component 5', 'principal component 6',
+                                'principal component 7', 'principal component 8',
+                                'principal component 9'])
+
+
+    exp_var = pca.explained_variance_ratio_
+    df_PCA = pd.DataFrame(pca.components_).transpose()
+
+    return exp_var, df_PCA
+
+# 1.
+exp_var_level, df_PCA_level = calc_PCA(x)
+# PCs' variance: [9.73631763e-01, 2.45092666e-02, 1.40056854e-03, 2.14744744e-04,
+#    1.17589630e-04, 7.68786454e-05, 2.36003836e-05, 1.67481323e-05,
+#    8.84063502e-06]
+
+# 2.
+exp_var_diff, df_PCA_diff = calc_PCA(y)
+# PCs' variannce: [0.79979631, 0.14880881, 0.03084573, 0.00874396, 0.00509963,
+#    0.00272263, 0.00198504, 0.00115331, 0.00084457]
+
+# 3.
+level = list(df_PCA_diff[0])
+slope = list(df_PCA_diff[1])
+curv = list(df_PCA_diff[2])
+
+df['level'] = 0
+df['slope'] = 0
+df['curv'] = 0
+
+for i in trange(len(df)):
+        df['level'].iloc[i] = sum(level*df[features_diff].iloc[i])
+        df['slope'].iloc[i] = sum(slope*df[features_diff].iloc[i])
+        df['curv'].iloc[i] = sum(curv*df[features_diff].iloc[i])
+
+
+corr_l_s_c = df[['level','slope','curv']].corr()
+
+
+# 4.
+df_EH_Q = df
+df['10yr_3mt'] = df['10yr'] - df['3mt']
+df['IPIndex_chg']=(df['IPIndex']/df['IPIndex'].shift(12))-1
+df['avg_IPIndex_chg_3'] = df['IPIndex_chg'].rolling(window=3).mean()
+df['avg_IPIndex_chg_3'] = df['avg_IPIndex_chg_3'].shift(-3)
+df['avg_IPIndex_chg_36'] = df['IPIndex_chg'].rolling(window=36).mean()
+df['avg_IPIndex_chg_36'] = df['avg_IPIndex_chg_36'].shift(-36)
+
+df_reg = df[['diff_3mt','10yr_3mt','slope','avg_IPIndex_chg_3','avg_IPIndex_chg_36']]
+df_reg=df_reg.dropna()
+
+y = df_reg['avg_IPIndex_chg_36'].values
+x = df_reg[['diff_3mt','10yr_3mt','slope']].values
+result = sm.OLS(y, x).fit()
+df_reg['pred_36'] = result.predict(x)
+print('36##########')
+print(result.summary())
+# R-squared (uncentered): 0.485
+# Adj. R-squared (uncentered): 0.482
+
+y = df_reg['avg_IPIndex_chg_3'].values
+x = df_reg[['diff_3mt','10yr_3mt','slope']].values
+result = sm.OLS(y, x).fit()
+df_reg['pred_3'] = result.predict(x)
+print('3##########')
+print(result.summary())
+# R-squared (uncentered): 0.192  
+# Adj. R-squared (uncentered): 0.186
+
+df_reg[["pred_3", "avg_IPIndex_chg_3"]].plot()
+df_reg[["pred_36", "avg_IPIndex_chg_36"]].plot()
+
+# 5.
+df_EH_Q['2yr_1yr'] = df_EH_Q['2yr'] - df_EH_Q['1yr']
+
+df_EH = df_EH_Q[['2yr_1yr','diff_1yr']]
+df_EH['diff_1yr']=df_EH['diff_1yr'].shift(-1)
+df_EH=df_EH.dropna()
+x=df_EH[['2yr_1yr']]
+y=df_EH['diff_1yr']
+
+# result = sm.OLS(y, x).fit()
+result = sm.OLS(y, x).fit()
+print(result.summary())
+# R-squared (uncentered): 0.000
+# Adj. R-squared (uncentered): -0.002
+# t statistic: 0.425
+
+# 6.
+df['frwd_1_1_r'] = ((1/(1+df['2yr'])**2)/(1/(1+df['1yr'])))-1
+
+
+
+
+

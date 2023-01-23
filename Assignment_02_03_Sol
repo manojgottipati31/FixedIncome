@@ -1,0 +1,300 @@
+from scipy.optimize import curve_fit
+import numpy as np
+import pandas as pd
+import math
+from matplotlib import pyplot as plt
+import numpy_financial as npf
+
+############################### Assignment_02 #################################################
+###############################    Part1    ###################################################
+
+xls = pd.ExcelFile(r'/Users/manojgottipati/Desktop/MQF/Rutgers Coursework/Term1/FixedIncome/Assignments/Assignment_02_Data.xlsx')
+df = pd.read_excel(xls, 'STRIPS')
+df_note = pd.read_excel(xls, 'T-Note')
+
+df['dts'] = df['Price']/100
+df['lgdts'] = np.log(df['dts'])
+df['r'] = 2*(((1/df['dts'])**(1/(2*df['Maturity'])))-1)
+
+print('og spot rate')
+plt.plot(df['Maturity'], df['r'])
+plt.show()
+
+df['fr'] = ((df['dts']/df['dts'].shift(-1))-1)/0.25
+
+print('og fr rate')
+plt.plot(df['Maturity'].iloc[:-3], df['fr'].iloc[:-3])
+plt.show()
+
+
+X = df.iloc[:, 0].values # maturity
+X
+
+y = df.iloc[:, 3].values # natural log of D(t) values
+y
+
+from scipy.optimize import curve_fit
+def fit_func(x, a, b, c, d, e):
+    # Curve fitting function
+    return a*X + b*X**2 + c*X**3 + d*X**4 + e*X**5
+
+params = curve_fit(fit_func, X, y)
+
+[a, b, c, d, e] = params[0]
+print([a, b, c, d, e])
+
+
+df['lgdts_c'] = a*df['Maturity'] + b*df['Maturity']**2 + c*df['Maturity']**3 + d*df['Maturity']**4 + e*df['Maturity']**5
+df['dts_c'] = math.e**df['lgdts_c']
+df['r_c'] = 2*(((1/df['dts_c'])**(1/(2*df['Maturity'])))-1)
+
+
+
+def PolyCoefficients(X, coeffs):
+    o = len(coeffs)
+    y = 0
+    for i in range(o):
+        y += coeffs[i]*X**i
+    return y
+x=np.arange(0.5, 31, 0.5).tolist() # maturity for semi-annual
+coeffs = [0, a, b, c, d, e]
+sa_spt = []
+dts_list = []
+for i in x:
+    dts = math.e**PolyCoefficients(i, coeffs)
+    r = 2*(((1/math.e**(PolyCoefficients(i, coeffs)))**(1/(2*i)))-1)
+    sa_spt.append(r)
+    dts_list.append(dts)
+
+sa_df = pd.DataFrame({'Maturity':x, 'r':sa_spt, 'dts':dts_list})
+print('est spot rate')
+plt.plot(sa_df['Maturity'], sa_df['r'])
+plt.show()
+
+sa_df['cum_sum_dts'] = sa_df['dts'].cumsum()
+sa_df['par_r'] = (2 * (100-100*sa_df['dts'])/(sa_df['cum_sum_dts']))/100
+print('est par rate')
+plt.plot(sa_df['Maturity'], sa_df['par_r'])
+plt.show()
+
+sa_df['fr'] = ((sa_df['dts']/sa_df['dts'].shift(-1))-1)/0.5
+print('est fr rate')
+plt.plot(sa_df['Maturity'].iloc[:-3], sa_df['fr'].iloc[:-3])
+plt.show()
+
+plt.plot(x, sa_df['r'])
+plt.show()
+
+
+###############################    Part2    ###################################################
+df_note = pd.read_excel(xls, 'T-Note')
+df_note['lytm'] = df_note['Yield']/100
+# df_note['lytm'] = np.log(df_note['Coupon']/200)
+
+X = df_note.iloc[:, 1].values # maturity
+X
+
+y = df_note.iloc[:, 4].values #  of ytm values
+y
+
+def fit_func(x, a, b, c, d, e, f):
+    # Curve fitting function
+    return a + b*X + c*X**2 + d*X**3 + e*X**4 + f*X**5
+
+params = curve_fit(fit_func, X, y)
+
+[a, b, c, d, e, f] = params[0]
+print([a, b, c, d, e, f])
+
+from tqdm import trange
+
+def PolyCoefficients(X, coeffs):
+    o = len(coeffs)
+    y = 0
+    for i in range(o):
+        y += coeffs[i]*X**i
+    return y
+x=np.arange(0.5, 27, 0.5).tolist()
+coeffs = [a, b, c, d, e, f]
+pars_list = []
+dts_list = []
+for i in x:
+    pars = PolyCoefficients(i, coeffs)
+    pars_list.append(pars)
+
+
+pars_list_df = pd.DataFrame({'Maturity':x, 'pars':pars_list})
+
+print('par rate')
+plt.plot(pars_list_df['Maturity'], pars_list_df['pars'])
+plt.show()
+
+spt_r_list = []
+pars_list_df['spt_r'] = ''
+pars_list_df['dts'] = ''
+dts_temp = 1/(1+((pars_list_df['pars'].iloc[0])/2))**(2*0.5)
+for i in trange(len(pars_list_df)):
+
+    sum1 = 0
+    dts_cum_sum = 0
+    for j in range(0,i):
+       dts_cum_sum =  dts_cum_sum + pars_list_df['dts'].iloc[j]
+    
+       sum1 = sum1 + ((pars_list_df['pars'].iloc[i])*100/2)*((dts_temp)**(2*pars_list_df['Maturity'].iloc[j]))
+       temp = (pars_list_df['pars'].iloc[j])
+
+    
+    dts_temp = (100 - (dts_cum_sum*((pars_list_df['pars'].iloc[i])*100/2)))/(100+(pars_list_df['pars'].iloc[i]*100/2))
+
+    pars_list_df['dts'].iloc[i] = dts_temp
+pars_list_df['spt_r'] = 2*(((1/pars_list_df['dts'])**(1/(2*pars_list_df['Maturity'])))-1)
+pars_list_df['fr'] = ((pars_list_df['dts']/pars_list_df['dts'].shift(-1))-1)/0.5
+
+print('fr rate')
+plt.plot(pars_list_df['Maturity'].iloc[:-3], pars_list_df['fr'].iloc[:-3])
+plt.show()
+
+print('spot rate')
+plt.plot(pars_list_df['Maturity'], pars_list_df['spt_r'])
+plt.show()
+
+
+############################### Assignment_03 #################################################
+#2.
+# sa_df['r_dv01'] =  sa_df['r']+0.0001
+sa_df['ytm'] = sa_df['par_r']
+sa_df['ytm_dv01'] = sa_df['ytm'] + 0.0001
+sa_df['dts_ytm_dv01'] = 1/((1+(sa_df['ytm_dv01']/2))**(2*sa_df['Maturity']))
+sa_df['cum_sum_dts_ytm_dv01'] = sa_df['dts_ytm_dv01'].cumsum()
+
+sa_df['bond_price']=''
+sa_df['bond_price_01']=''
+# sa_df['ytm']=''
+for i in range(len(sa_df)):
+
+    bond_price = ((sa_df['cum_sum_dts'].iloc[i])*((sa_df['par_r'].iloc[i])/0.02))  + (100*(sa_df['dts'].iloc[i]))
+    # bond_price = (npf.pv(sa_df['par_r'].iloc[i]/2, 2*sa_df['Maturity'].iloc[i], (sa_df['par_r'].iloc[i])/0.02, 100)) * -1
+    # bond_price_01 = ((sa_df['cum_sum_dts_ytm_dv01'].iloc[i])*((sa_df['par_r'].iloc[i])/0.02))  + (100*(sa_df['dts_ytm_dv01'].iloc[i]))
+    bond_price_01 = (npf.pv(sa_df['ytm_dv01'].iloc[i]/2, 2*sa_df['Maturity'].iloc[i], (sa_df['par_r'].iloc[i])/0.02, 100)) * -1
+    # bond_price_01 = 
+    sa_df['bond_price'].iloc[i] = bond_price
+    sa_df['bond_price_01'].iloc[i] = bond_price_01
+
+    x = int((sa_df['Maturity'].iloc[i])*2)
+    # sa_df['ytm'].iloc[i]  = npf.irr([-bond_price] + [(sa_df['par_r'].iloc[i])/0.02]*x + [100])
+# sa_df['ytm'] = sa_df['par_r']
+sa_df['DV01'] = sa_df['bond_price_01'] - sa_df['bond_price']
+
+
+#4.
+def calc_dur(df, i):
+    df_dur_calc = pd.DataFrame()
+    df_dur_calc['t'] = np.arange(1, (df['Maturity'].iloc[i]+0.5)*2, 1).tolist()
+    df_dur_calc['cf'] = (df['par_r'].iloc[i])/0.02
+    df_dur_calc['cf'].iloc[-1] = 100 + (df['par_r'].iloc[i])/0.02
+    df_dur_calc['pv@ytm'] = 1/((1+(df['ytm'].iloc[i])/2)**df_dur_calc['t'])
+    df_dur_calc['pv_cf'] = df_dur_calc['cf']*df_dur_calc['pv@ytm']
+    df_dur_calc['t*pv_cf'] = df_dur_calc['t']*df_dur_calc['pv_cf']
+    duration = sum(df_dur_calc['t*pv_cf'])/sum(df_dur_calc['pv_cf'])
+
+    return duration
+
+sa_df['mac_duration'] = ''
+for i in range(len(sa_df)):
+    duration = calc_dur(sa_df, i)
+
+    sa_df['mac_duration'].iloc[i] = duration/2
+
+sa_df['mod_duration']=sa_df['mac_duration']/(1+(sa_df['par_r']/2))
+
+
+#5.
+sa_df_2c = sa_df[['Maturity', 'r', 'par_r', 'ytm']]
+sa_df_2c['par_r'] = 0.02
+sa_df_2c['mac_duration'] = ''
+for i in range(len(sa_df_2c)):
+    duration = calc_dur(sa_df_2c, i)
+    sa_df_2c['mac_duration'].iloc[i] = duration/2
+
+sa_df_2c['mod_duration']=sa_df_2c['mac_duration']/(1+(sa_df_2c['par_r']/2))
+
+
+#6.
+sa_df_12c = sa_df[['Maturity', 'r', 'par_r', 'ytm']]
+sa_df_12c['par_r'] = 0.12
+sa_df_12c['mac_duration'] = ''
+for i in range(len(sa_df_12c)):
+    duration = calc_dur(sa_df_12c, i)
+    sa_df_12c['mac_duration'].iloc[i] = duration/2
+
+sa_df_12c['mod_duration']=sa_df_12c['mac_duration']/(1+(sa_df_12c['par_r']/2))
+
+
+#8.
+fv=5000000
+dts = float(sa_df[sa_df['Maturity'] == 3]['dts'])
+pv = dts*fv
+
+
+#9.
+#9.1
+sa_df['mac_duration_ZCB'] = sa_df['Maturity']
+sa_df['mod_duration_ZCB'] = sa_df_2c['mac_duration']/(1+(sa_df_2c['r']/2))
+
+#9.2
+# on_paper_calc
+
+
+#10.
+def calc_convx(df, i):
+    df_dur_calc = pd.DataFrame()
+    df_dur_calc['t'] = np.arange(1, (df['Maturity'].iloc[i]+0.5)*2, 1).tolist()
+    df_dur_calc['cf'] = (df['par_r'].iloc[i])/0.02
+    df_dur_calc['cf'].iloc[-1] = 100 + (df['par_r'].iloc[i])/0.02
+    df_dur_calc['pv@ytm'] = 1/((1+(df['ytm'].iloc[i])/2)**df_dur_calc['t'])
+    df_dur_calc['pv_cf'] = df_dur_calc['cf']*df_dur_calc['pv@ytm']
+    df_dur_calc['t*pv_cf'] = df_dur_calc['t']*df_dur_calc['pv_cf']*(df_dur_calc['t']+1)
+    convexity = sum(df_dur_calc['t*pv_cf'])/(sum(df_dur_calc['pv_cf'])*((1+(sa_df_2c['par_r'].iloc[i]/2))**2))
+
+    return convexity/4
+
+sa_df['convexity'] = ''
+for i in range(len(sa_df)):
+    convexity = calc_convx(sa_df, i)
+    sa_df['convexity'].iloc[i] = convexity
+
+
+#11.
+#11.1.
+# increase 100 bp
+sa_df['chg_price_convx_dur_100p'] = ((-sa_df['mod_duration']*0.01) + (0.5*sa_df['convexity']*(0.01**2)))*100
+sa_df['bond_price_100p_convx_dur'] = sa_df['bond_price'] + sa_df['chg_price_convx_dur_100p']
+
+sa_df['r_dv100p'] =  sa_df['r']+0.01
+sa_df['dts_dv100p'] = 1/((1+(sa_df['r_dv100p']/2))**(2*sa_df['Maturity']))
+sa_df['cum_sum_dts_dv100p'] = sa_df['dts_dv100p'].cumsum()
+sa_df['bond_price_100p']=''
+for i in range(len(sa_df)):
+    bond_price_100 = ((sa_df['cum_sum_dts_dv100p'].iloc[i])*((sa_df['par_r'].iloc[i])/0.02))  + (100*(sa_df['dts_dv100p'].iloc[i]))
+    sa_df['bond_price_100p'].iloc[i] = bond_price_100
+
+
+#11.2.
+# decrese 100 bp
+sa_df['chg_price_convx_dur_100m'] = ((-sa_df['mod_duration']*(-0.01)) + (0.5*sa_df['convexity']*((-0.01)**2)))*100
+sa_df['bond_price_100m_convx_dur'] = sa_df['bond_price'] + sa_df['chg_price_convx_dur_100m']
+
+sa_df['r_dv100m'] =  sa_df['r']-0.01
+sa_df['dts_dv100m'] = 1/((1+(sa_df['r_dv100m']/2))**(2*sa_df['Maturity']))
+sa_df['cum_sum_dts_dv100m'] = sa_df['dts_dv100m'].cumsum()
+sa_df['bond_price_100m']=''
+for i in range(len(sa_df)):
+    bond_price_100 = ((sa_df['cum_sum_dts_dv100m'].iloc[i])*((sa_df['par_r'].iloc[i])/0.02))  + (100*(sa_df['dts_dv100m'].iloc[i]))
+    sa_df['bond_price_100m'].iloc[i] = bond_price_100
+
+
+# verification
+sa_df[['bond_price_100m','bond_price_100m_convx_dur','bond_price_100p','bond_price_100p_convx_dur']]
+sa_df[['Maturity', 'r', 'dts', 'par_r', 'fr', 'bond_price', 'bond_price_01', 'ytm',
+       'DV01', 'mac_duration', 'mod_duration', 'mac_duration_ZCB',
+       'mod_duration_ZCB', 'convexity']]

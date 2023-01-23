@@ -1,0 +1,137 @@
+import pandas as pd
+import numpy as np
+from scipy.optimize import minimize
+
+alpha = 1
+beta = 1
+sd = 1
+params = alpha,beta,sd
+
+df = pd.read_excel(r'/Users/manojgottipati/Desktop/MQF/Rutgers Coursework/Term1/FixedIncome/Assignments/Assignment_06_Data.xlsx')
+df = df[['year', 'month', 'day', 'cmt0.25', 'cmt2', 'cmt3', 'cmt5', 'cmt7', 'cmt10']]
+for i in [0.25, 2, 3, 5, 7, 10]:
+    df['cmt'+str(i)] = df['cmt'+str(i)]/100
+
+def calc_AtBt(alpha,beta,sd,i):
+    t1 = (((sd**2)/(2*(beta**2)))-(alpha/beta))*float(i)
+    t2 = (alpha/(beta**2))-((sd**2)/(beta**3))*(1-np.exp(-beta*float(i)))
+    t3 = (sd**2/4*(beta**3))*(1-np.exp(-2*beta*float(i)))
+    At = np.exp(t1 + t2 + t3)
+
+    Bt = (1/beta)*(1-np.exp(-beta*float(i)))
+
+    return At, Bt
+
+def min_error(params, df):
+
+    alpha,beta,sd=params
+    At_dict = {}
+    Bt_dict = {}
+    for i in [0.25, 2, 3, 5, 7, 10]:
+        At, Bt = calc_AtBt(alpha,beta,sd,i)
+        if isinstance(At, (int, float, complex)) & isinstance(Bt, (int, float, complex)):
+            if At>0:
+                At_dict[i] = At
+                Bt_dict[i] = Bt
+            else:
+                return 10000000000
+        else:
+            return 100000000000
+
+
+
+    # calculate r0 at t = 0.25
+    df['r0'] = ((df['cmt0.25'] + np.log(At)/0.25)*0.25)/Bt
+
+    sq_err = 0
+    for i in [0.25, 2, 3, 5, 7, 10]:
+        df['Dt'+str(i)] = At_dict[i]*(np.exp(-Bt_dict[i]*df['r0']))
+        df['par'+str(i)] = (2 * (100-100*df['Dt'+str(i)])/(df['Dt'+str(i)].cumsum()))/100
+        sq_err = sq_err + (df['par'+str(i)] - df['cmt'+str(i)])**2
+
+    return ((sq_err.sum())**0.5)
+
+min_error(params)
+
+
+print(minimize(min_error, method='SLSQP'))
+
+########################################################
+########################################################
+########################################################
+import numpy as np
+from scipy.optimize import minimize
+
+df_rates = pd.read_excel(r'/Users/manojgottipati/Desktop/MQF/Rutgers Coursework/Term1/FixedIncome/Assignments/Assignment_06_Data.xlsx')
+df_rates = df_rates[['year', 'month', 'day', 'cmt0.25', 'cmt2', 'cmt3', 'cmt5', 'cmt7', 'cmt10']]
+for i in [0.25, 2, 3, 5, 7, 10]:
+    df_rates['cmt'+str(i)] = df_rates['cmt'+str(i)]/100
+
+alpha = 0.01
+beta = 0.01
+sd = 0.01
+params = alpha,beta,sd
+At_dict = {}
+Bt_dict = {}
+def model(params, df):
+    # here you need to implement your real model
+    # for Predicted_Installation
+    alpha,beta,sd=params
+
+    for i in [0.25, 2, 3, 5, 7, 10]:
+        At, Bt = calc_AtBt(alpha,beta,sd,i)
+        if isinstance(At, (int, float, complex)) & isinstance(Bt, (int, float, complex)):
+            if At>0:
+                At_dict[i] = At
+                Bt_dict[i] = Bt
+            else:
+                return pd.DataFrame(index=pd.Series(range(0,len(df))), columns=['par0.25','par2','par3','par5','par7','par10']).fillna(10000000)
+        else:
+            return pd.DataFrame(index=pd.Series(range(0,len(df))), columns=['par0.25','par2','par3','par5','par7','par10']).fillna(10000000)
+
+
+
+    # calculate r0 at t = 0.25
+    df['r0'] = ((df['cmt0.25'] + np.log(At_dict[0.25])/0.25)*0.25)/Bt_dict[0.25]
+
+    # sq_err = 0
+    for i in [0.25, 2, 3, 5, 7, 10]:
+        df['Dt'+str(i)] = At_dict[i]*(np.exp(-Bt_dict[i]*df['r0']))
+        df['par'+str(i)] = (2 * (100-100*df['Dt'+str(i)])/(df['Dt'+str(i)].cumsum()))/100
+        # sq_err = sq_err + (df['par'+str(i)] - df['cmt'+str(i)])**2
+
+    return df[['par0.25','par2','par3','par5','par7','par10']]
+
+def sum_of_squares(params, X):
+    
+    y_pred = model(params, X)
+    
+
+    sq_err = 0
+    for i in [0.25, 2, 3, 5, 7, 10]:
+        # df['Dt'+str(i)] = At_dict[i]*(np.exp(-Bt_dict[i]*df['r0']))
+        # df['par'+str(i)] = (2 * (100-100*df['Dt'+str(i)])/(df['Dt'+str(i)].cumsum()))/100
+        sq_err = sq_err + (y_pred['par'+str(i)] - X['cmt'+str(i)])**2
+        sq_err=sq_err.sum()
+    return sq_err**0.5
+
+
+# generate some test data
+# X = np.random.random(10) # this is "month" if I understood your problem correctly
+# Y = model(params, df) # Original_Installation
+
+
+# perform fit to find optimal parameters
+# initial value for alpha (guess)
+# alpha_0 = 0.1
+# result = minimize(cost, params_init, args=(t, r))
+bnds = ((0.00001, 1), (0.000001, 1), (0.000001, 1))
+res = minimize(sum_of_squares, [params], args=(df_input), method='TNC', bounds=bnds, tol=1e-10)
+print(res)
+
+from scipy.optimize import basinhopping
+minimizer_kwargs = {"method": "BFGS", "args":(df_rates)}
+ret = basinhopping(sum_of_squares, [params], minimizer_kwargs=minimizer_kwargs, 
+                    disp = True, niter=200)
+
+

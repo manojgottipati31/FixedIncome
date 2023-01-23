@@ -1,0 +1,138 @@
+# Import necessary libraries
+import math
+from tqdm import trange
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set model parameters
+r0 = 0.045 # initial interest rate
+a = 0.0208 # mean reversion rate
+b = 0.2431 # long-term mean interest rate
+sigma = 0.07 # volatility of interest rates
+
+# Set simulation parameters
+T = 10+1 # number of time steps
+dt = 1 # size of time step
+N = 10000 # number of simulations to run
+# Initialize arrays to store results
+r_paths = np.zeros((N, T)) # interest rate paths
+r_paths[:, 0] = r0 # set initial interest rate for all simulations
+
+# Loop through simulations
+for i in trange(N):
+  for t in range(1, T):
+    # Generate random shock
+    epsilon = np.random.normal(0, 1)
+    
+    # Update interest rate
+    r_paths[i, t] = r_paths[i, t-1] + (a - (b * r_paths[i, t-1])) * dt + sigma*epsilon*(dt**0.5)
+
+r_paths_df = pd.DataFrame(r_paths)
+
+def calc_AtBt(a,b,sigma,fut):
+    t1 = ((sigma**2)/(2*(b**2))-(a/b))*fut
+    t2 = ((a/(b**2))-((sigma**2)/b**3))*(1-np.exp(-b*fut))
+    t3 = (a**2)/(4*(b**3))*(1-np.exp(-2*b*fut))
+    At = np.exp(t1+t2+t3)
+    Bt = (1/b)*(1-np.exp(-b*fut))
+    return At, Bt
+
+for i in range(1, T):
+    fut=0.25
+    At, Bt = calc_AtBt(a,b,sigma,fut)
+    r_paths_df['Dt_'+str(i)+"_0.25"] = At*np.exp(-Bt*r_paths_df[i])*np.exp(-r0*i)
+    r_paths_df['Dt_'+str(i)] = np.exp(-r_paths_df[i]*i)
+    r_paths_df['FRA_R_'+str(i)] = (360/180)*((r_paths_df['Dt_'+str(i)]/r_paths_df['Dt_'+str(i)+"_0.25"])-1)
+
+
+
+
+#4.
+df_trans = r_paths_df[[0,1,2,3,4,5,6,7,8,9,10]].transpose()
+for i in df_trans.columns:
+    df_trans[i] = df_trans[i].expanding().mean()
+
+df_avg = df_trans.transpose()
+dt_exp_avg = {}
+df_vas_for = {}
+for i in range(1, T):
+    dt_exp_avg['dt_'+str(i)] = (np.exp(-df_avg[i]*i)).mean()
+    At, Bt = calc_AtBt(a,b,sigma,i)
+    df_vas_for['dt_'+str(i)] = At*np.exp(-Bt*r0)
+print("vasicek")
+print(df_vas_for)
+print('#############')
+print('exp value of Dt')
+print(dt_exp_avg)
+
+#5.
+
+
+
+#6.
+df_accrual = r_paths_df[[0,1,2,3,4,5,6,7,8,9,10]]
+for i in [2,3,4,5,6,7,8,9,10]:
+    
+    df_accrual['cf_'+str(i)] = np.where(((1/np.exp(-df_accrual[i]*1))-1>0.04)&((1/np.exp(-df_accrual[i]*1))-1<0.07), ((1/np.exp(-df_accrual[i]*1))-1)*100, 0)
+    df_accrual['pv_cf_'+str(i)] = df_accrual['cf_'+str(i)]*np.exp(-i*r0)
+col_list_df = df_accrual.filter(regex='pv_cf_')
+df_accrual['cf_sum'] = df_accrual[col_list_df.columns].sum(axis=1)
+print(df_accrual['cf_sum'].mean())
+
+#7.
+df_inv_float = r_paths_df[[0,1,2,3,4,5]]
+for i in [2,3,4,5]:
+    rate = (1/np.exp(-df_inv_float[i]*1))-1
+
+    df_inv_float['cf_'+str(i)] = np.where((2*rate*100 - 6 >0), 2*rate*100 - 6, 0)
+    df_inv_float['pv_cf_'+str(i)] = df_inv_float['cf_'+str(i)]*np.exp(-i*r0)
+col_list_df = df_inv_float.filter(regex='pv_cf_')
+df_inv_float['cf_sum'] = df_inv_float[col_list_df.columns].sum(axis=1)
+print(df_inv_float['cf_sum'].mean())
+
+
+#8.
+def calc_swaption(n,m,a,b,sigma,r_paths_df):
+    r0_dts = {}
+    At, Bt = calc_AtBt(a,b,sigma,n)
+    dt_ro_n = At*np.exp(-Bt*r0)
+    for i in range(1,(n+m)*2+1):
+        At, Bt = calc_AtBt(a,b,sigma,i/2)
+        dt = At*np.exp(-Bt*r0)
+        r0_dts[i/2] = dt
+    fsr = ((100*(r0_dts[n]-r0_dts[n+m]))/sum(list(dict((k, r0_dts[k]) for k in np.arange(n+0.5, n+m+0.5, 0.5)).values())))*2
+
+    swap_df = r_paths_df[[0,1,2,3,4,5,6,7,8,9,10]]
+
+    payoff_dict = {}
+    for i in range(1,m*2+1):
+        At, Bt = calc_AtBt(a,b,sigma,i/2)
+        swap_df['dt_'+str(n)+'_'+str(i/2)] = At*np.exp(-Bt*swap_df[n])
+        swap_df['cf_'+str(i/2)] = swap_df['dt_'+str(n)+'_'+str(i/2)]*fsr/2
+    swap_df['cf_'+str(float(m))] = swap_df['cf_'+str(float(m))] + 100
+
+    col_list_df = swap_df.filter(regex='cf_')
+    swap_df['Price_@'+str(n)] = swap_df[col_list_df.columns].sum(axis=1)
+
+    for i in range(1,m*2+1):
+        swap_df['PV_cf_'+str(i/2)]=((swap_df['dt_'+str(n)+'_'+str(i/2)]*swap_df['cf_'+str(i/2)]))
+
+    col_list_df = swap_df.filter(regex='PV_cf_')
+    swap_df['Price_@'+str(n)] = swap_df[col_list_df.columns].sum(axis=1)
+
+    swap_df['payoff_@'+str(n)] = swap_df['Price_@'+str(n)]  - 100
+    swap_df['payoff_@0'] = swap_df['payoff_@'+str(n)]*dt_ro_n
+    swap_df['payoff_@0'] = np.where(swap_df['payoff_@0']>0,swap_df['payoff_@0'],0)
+
+
+    return swap_df['payoff_@0'].mean()
+
+
+print(calc_swaption(1,1,a,b,sigma,r_paths_df))
+print(calc_swaption(1,5,a,b,sigma,r_paths_df))
+print(calc_swaption(5,5,a,b,sigma,r_paths_df))
+
+
